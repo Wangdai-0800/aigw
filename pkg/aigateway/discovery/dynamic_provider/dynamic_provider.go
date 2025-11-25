@@ -16,10 +16,8 @@ package dprovider
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"time"
@@ -34,11 +32,10 @@ import (
 	"mosn.io/htnn/api/pkg/filtermanager/api"
 
 	managertypes "github.com/aigw-project/aigw/pkg/aigateway/clustermanager/types"
+	xdsserver "github.com/aigw-project/aigw/pkg/aigateway/discovery/xdsserver"
 )
 
 const (
-	staticClusterFile = "/etc/aigw/static_clusters.json"
-
 	// istio
 	istioPodAddrEnv = "AIGW_ISTIO_ADDR"
 	defaultAddr     = "istiod.istio-system.svc.cluster.local:15010"
@@ -64,28 +61,9 @@ var config ClustersConfig
 var istioXdsAddr string
 
 func init() {
-	fp, err := os.Open(staticClusterFile)
-	if err != nil {
-		api.LogErrorf("failed to open %s: %v", staticClusterFile, err)
-		return
-	}
-	defer fp.Close()
-
-	data, err := io.ReadAll(fp)
-	if err != nil {
-		api.LogErrorf("failed to read %s: %v", staticClusterFile, err)
-		return
-	}
-
-	err = json.Unmarshal(data, &config)
-	if err != nil {
-		api.LogErrorf("failed to unmarshal %s: %v", staticClusterFile, err)
-	}
-
-	api.LogInfof("static cluster config loaded: %+v", config)
-
 	// load istio pod addr
 	istioXdsAddr = resolveIstioAddr()
+	api.LogInfof("dynamic cluster provider use istio addr: %+v", istioXdsAddr)
 }
 
 // get istio xds server ip:port from enviroment variable; use defaultNodeId by default
@@ -107,38 +85,24 @@ func resolveIstioAddr() string {
 	return addr
 }
 
-type StaticClusterProvider struct {
-	allClusters map[string]*managertypes.ClusterInfo
+type DynamicClusterProvider struct {
+	BaseClusterInfoProvider
 }
 
-func NewStaticClusterProvider() managertypes.ClusterInfoProvider {
-	p := &StaticClusterProvider{
+func NewDynamicClusterProvider() managertypes.ClusterInfoProvider {
+	p := &DynamicClusterProvider{
 		allClusters: make(map[string]*managertypes.ClusterInfo),
 	}
-	for _, c := range config.Clusters {
-		endpoints := make([]managertypes.Endpoint, 0, len(c.Endpoints))
-		for _, ep := range c.Endpoints {
-			endpoints = append(endpoints, managertypes.Endpoint{
-				Address: ep.Address,
-				Port:    ep.Port,
-			})
-		}
-		p.allClusters[c.Name] = &managertypes.ClusterInfo{
-			Name:      c.Name,
-			Endpoints: endpoints,
-		}
-	}
-
 	p.AutoUpdateFromPilot(defaultNodeId, 10*time.Second)
 
-	api.LogInfof("new static cluster provider: %+v", p)
+	api.LogInfof("new dynamic cluster provider: %+v", p)
 
-	startCdsServer(defaultCdsAddress, p)
+	xdsserver.StartCdsServer("", p)
 	return p
 }
 
 // updata the snapshot form istio
-func (p *StaticClusterProvider) AutoUpdateFromPilot(nodeID string, interval time.Duration) {
+func (p *DynamicClusterProvider) AutoUpdateFromPilot(nodeID string, interval time.Duration) {
 	go func() {
 		for {
 			err := p.subscribeIstioPilot(nodeID)
@@ -151,7 +115,7 @@ func (p *StaticClusterProvider) AutoUpdateFromPilot(nodeID string, interval time
 }
 
 // subscribe istio pilot and pull the cds info
-func (p *StaticClusterProvider) subscribeIstioPilot(nodeID string) error {
+func (p *DynamicClusterProvider) subscribeIstioPilot(nodeID string) error {
 	conn, err := grpc.NewClient(
 		istioXdsAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
@@ -258,7 +222,7 @@ func extractFromCLA(cla *endpointpb.ClusterLoadAssignment) []managertypes.Endpoi
 	return eps
 }
 
-func (p *StaticClusterProvider) GetAllClusters() []*managertypes.ClusterInfo {
+func (p *DynamicClusterProvider) GetAllClusters() []*managertypes.ClusterInfo {
 	clusters := make([]*managertypes.ClusterInfo, 0, len(p.allClusters))
 	for _, cluster := range p.allClusters {
 		clusters = append(clusters, cluster)
@@ -266,7 +230,7 @@ func (p *StaticClusterProvider) GetAllClusters() []*managertypes.ClusterInfo {
 	return clusters
 }
 
-func (p *StaticClusterProvider) getCluster(name string) *managertypes.ClusterInfo {
+func (p *DynamicClusterProvider) getCluster(name string) *managertypes.ClusterInfo {
 	if cluster, ok := p.allClusters[name]; ok {
 		return cluster
 	}
@@ -274,14 +238,14 @@ func (p *StaticClusterProvider) getCluster(name string) *managertypes.ClusterInf
 	return nil
 }
 
-func (p *StaticClusterProvider) GetClusterInfo(name string) (*managertypes.ClusterInfo, error) {
+func (p *DynamicClusterProvider) GetClusterInfo(name string) (*managertypes.ClusterInfo, error) {
 	if cluster := p.getCluster(name); cluster != nil {
 		return cluster, nil
 	}
 	return nil, errors.New("cluster not found")
 }
 
-func (p *StaticClusterProvider) WatchCluster(name string, notifier managertypes.ClusterInfoNotifier) {
+func (p *DynamicClusterProvider) WatchCluster(name string, notifier managertypes.ClusterInfoNotifier) {
 	// TODO: static cluster won't change, so just notify once
 	if cluster := p.getCluster(name); cluster != nil {
 		notifier(cluster)

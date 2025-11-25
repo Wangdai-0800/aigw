@@ -30,8 +30,12 @@ const (
 	defaultCdsAddress = "127.0.0.1:9999"
 )
 
-func startCdsServer(address string, provider managertypes.ClusterInfoProvider) {
-	lis, err := net.Listen("tcp", address)
+func StartCdsServer(address string, provider managertypes.ClusterInfoProvider) {
+	cdsAddr := address
+	if cdsAddr == "" {
+		cdsAddr = defaultCdsAddress
+	}
+	lis, err := net.Listen("tcp", cdsAddr)
 	if err != nil {
 		api.LogErrorf("listen local cds server failed: %v", err)
 		return
