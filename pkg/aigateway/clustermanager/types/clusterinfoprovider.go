@@ -17,4 +17,5 @@ package types
 type ClusterInfoProvider interface {
 	GetClusterInfo(name string) (*ClusterInfo, error)
 	WatchCluster(name string, notifier ClusterInfoNotifier)
+	GetAllClusters() []*ClusterInfo
 }

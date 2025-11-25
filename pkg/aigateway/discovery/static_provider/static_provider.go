@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package staticdemo
+package sprovider
 
 import (
 	"context"
@@ -34,6 +34,7 @@ import (
 	"mosn.io/htnn/api/pkg/filtermanager/api"
 
 	managertypes "github.com/aigw-project/aigw/pkg/aigateway/clustermanager/types"
+	xdsserver "github.com/aigw-project/aigw/pkg/aigateway/discovery/xdsserver"
 )
 
 const (
@@ -133,7 +134,7 @@ func NewStaticClusterProvider() managertypes.ClusterInfoProvider {
 
 	api.LogInfof("new static cluster provider: %+v", p)
 
-	startCdsServer(defaultCdsAddress, p)
+	xdsserver.startCdsServer(defaultCdsAddress, p)
 	return p
 }
 
